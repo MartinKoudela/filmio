@@ -1,6 +1,13 @@
 <?php
-// Připojení k databázi – předpokládám, že v db_connect.php vznikne $conn (mysqli)
+
+session_start();
 require_once __DIR__ . '/db_connect.php';
+
+if (empty($_SESSION['is_admin'])) {
+    header('Location: index.php');
+    exit;
+}
+
 
 if ($conn->connect_errno) {
     die('DB connection failed: ' . $conn->connect_error);

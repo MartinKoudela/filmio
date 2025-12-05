@@ -364,8 +364,8 @@ $stmt->close();
                 <input type="hidden" name="action" value="create">
             </form>
         </div>
-        <div class="overflow rounded-xl ring-1 ring-white/10">
-            <table class="min-w-full divide-y divide-white/5 text-left text-sm text-slate-200">
+        <div class="overflow-x-auto rounded-xl ring-1 ring-white/10">
+            <table class="min-w-full w-full divide-y divide-white/5 text-left text-sm text-slate-200">
                 <thead class="bg-white/5 text-xs uppercase tracking-[0.2em] text-slate-400">
                 <tr>
                     <th class="px-4 py-3">Name</th>

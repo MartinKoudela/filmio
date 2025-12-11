@@ -133,21 +133,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </form>
     </section>
 
-    <section class="w-full max-w-md space-y-6 rounded-3xl bg-white/5 p-8 ring-1 ring-white/10 backdrop-blur">
+    <section class="w-full max-w-md space-y-9 rounded-3xl bg-white/5 p-8 ring-1 ring-white/10 backdrop-blur">
         <header class="space-y-2">
             <h2 class="text-2xl font-semibold text-white">Sign in</h2>
             <p class="text-sm text-slate-400">Existing members can access the dashboard using their name and email.</p>
         </header>
         <form method="post" class="space-y-4">
-            <label class="space-y-2 text-sm text-slate-300">
-                <span class="block">Name</span>
-                <input name="login_name" required placeholder="Ava" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
-            </label>
-            <label class="space-y-2 text-sm text-slate-300">
+            <label for="loginName" class="text-sm text-slate-300">Name</label>
+            <input id="loginName" name="login_name" required placeholder="Ava" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
+
+            <label class="text-sm text-slate-300">
                 <span class="block">Email</span>
                 <input name="login_email" type="email" required placeholder="ava@example.com" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
             </label>
-            <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-200">
+            <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-400 mt-4 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-200">
                 Access dashboard
             </button>
             <input type="hidden" name="action" value="login">

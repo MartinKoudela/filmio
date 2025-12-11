@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'logou
 
 // Ensure join request table exists
 $conn->query(
-    'CREATE TABLE IF NOT EXISTS `screening_requests` (
+        'CREATE TABLE IF NOT EXISTS `screening_requests` (
         `id` INT AUTO_INCREMENT PRIMARY KEY,
         `ID_promítání` INT NOT NULL,
         `ID_člen` INT NOT NULL,
@@ -65,9 +65,9 @@ $stmt->close();
 $films = $conn->query('SELECT `název`, `režisér`, `rok_vydání`, `žánr` FROM `film` ORDER BY `název`')->fetch_all(MYSQLI_ASSOC);
 
 $stmt = $conn->prepare(
-    'SELECT s.`ID_promítání`, s.`datum`, s.`čas`, s.`místo`, f.`název` AS film_název ' .
-    'FROM `sraz` s LEFT JOIN `film` f ON s.`ID_film` = f.`ID_film` ' .
-    'ORDER BY s.`datum` ASC, s.`čas` ASC'
+        'SELECT s.`ID_promítání`, s.`datum`, s.`čas`, s.`místo`, f.`název` AS film_název ' .
+        'FROM `sraz` s LEFT JOIN `film` f ON s.`ID_film` = f.`ID_film` ' .
+        'ORDER BY s.`datum` ASC, s.`čas` ASC'
 );
 $stmt->execute();
 $screenings = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -104,7 +104,9 @@ $requestedScreeningIds = array_map(static fn($row) => (int)$row['ID_promítání
             </div>
             <form method="post">
                 <input type="hidden" name="action" value="logout">
-                <button class="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15 hover:bg-white/20">Log out</button>
+                <button class="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15 hover:bg-white/20">
+                    Log out
+                </button>
             </form>
         </div>
     </div>
@@ -115,7 +117,8 @@ $requestedScreeningIds = array_map(static fn($row) => (int)$row['ID_promítání
         <div class="rounded-xl bg-slate-900/60 p-4 ring-1 ring-white/10">
             <p class="text-xs uppercase tracking-[0.25em] text-slate-400">Membership</p>
             <p class="mt-2 text-xl font-semibold text-white"><?= htmlspecialchars($memberRow['členství'] ?? 'Member') ?></p>
-            <p class="text-sm text-slate-400">Joined on <?= htmlspecialchars($memberRow['datum_registrace'] ?? '') ?></p>
+            <p class="text-sm text-slate-400">Joined
+                on <?= htmlspecialchars($memberRow['datum_registrace'] ?? '') ?></p>
         </div>
         <div class="rounded-xl bg-slate-900/60 p-4 ring-1 ring-white/10">
             <p class="text-xs uppercase tracking-[0.25em] text-slate-400">Films</p>
@@ -155,7 +158,7 @@ $requestedScreeningIds = array_map(static fn($row) => (int)$row['ID_promítání
                 <tbody class="divide-y divide-white/5 bg-slate-950/40">
                 <?php if ($films): ?>
                     <?php foreach ($films as $film): ?>
-                        <tr class="hover:bg-white/5 transition">
+                        <tr class="hover:bg-white/5 transition" onclick="window.location.href='ratings.php'">
                             <td class="px-4 py-3 font-medium text-white"><?= htmlspecialchars($film['název']) ?></td>
                             <td class="px-4 py-3 text-slate-300"><?= htmlspecialchars($film['režisér']) ?></td>
                             <td class="px-4 py-3"><?= (int)$film['rok_vydání'] ?></td>
@@ -205,8 +208,11 @@ $requestedScreeningIds = array_map(static fn($row) => (int)$row['ID_promítání
                                 <?php else: ?>
                                     <form method="post" class="inline-flex">
                                         <input type="hidden" name="action" value="join_screening">
-                                        <input type="hidden" name="screening_id" value="<?= (int)$screening['ID_promítání'] ?>">
-                                        <button class="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/20" type="submit">Request</button>
+                                        <input type="hidden" name="screening_id"
+                                               value="<?= (int)$screening['ID_promítání'] ?>">
+                                        <button class="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/20"
+                                                type="submit">Request
+                                        </button>
                                     </form>
                                 <?php endif; ?>
                             </td>
@@ -214,7 +220,9 @@ $requestedScreeningIds = array_map(static fn($row) => (int)$row['ID_promítání
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="5" class="px-4 py-6 text-center text-slate-400">No screenings have been scheduled yet.</td>
+                        <td colspan="5" class="px-4 py-6 text-center text-slate-400">No screenings have been scheduled
+                            yet.
+                        </td>
                     </tr>
                 <?php endif; ?>
                 </tbody>

@@ -12,6 +12,17 @@ if (isset($_SESSION['member_id'])) {
 $successMessage = '';
 $errorMessage = '';
 
+// Check for session timeout message
+if (isset($_GET['timeout']) && $_GET['timeout'] === '1') {
+    $errorMessage = 'Your session has expired. Please sign in again.';
+}
+
+// Ensure password column exists in the database
+$columnCheck = $conn->query("SHOW COLUMNS FROM `člen` LIKE 'heslo'");
+if ($columnCheck && $columnCheck->num_rows === 0) {
+    $conn->query("ALTER TABLE `člen` ADD COLUMN `heslo` VARCHAR(255) DEFAULT NULL");
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -19,12 +30,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $firstName  = trim($_POST['first_name'] ?? '');
         $lastName   = trim($_POST['last_name'] ?? '');
         $email      = trim($_POST['email'] ?? '');
+        $password   = $_POST['password'] ?? '';
         $membership = trim($_POST['membership'] ?? 'Member');
         $address    = trim($_POST['address'] ?? '');
         $regDate    = date('Y-m-d');
 
         if ($firstName === '' || $email === '') {
             $errorMessage = 'Please fill in at least your first name and email to register.';
+        } elseif (strlen($password) < 6) {
+            $errorMessage = 'Password must be at least 6 characters long.';
         } else {
             // Check if the member already exists
             $stmt = $conn->prepare('SELECT `ID_člen` FROM `člen` WHERE `email` = ? LIMIT 1');
@@ -37,10 +51,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($existingId) {
                 $errorMessage = 'An account with this email already exists. Please sign in instead.';
             } else {
+                $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
                 $stmt = $conn->prepare(
-                        'INSERT INTO `člen` (`jméno`, `příjmení`, `email`, `adresa`, `datum_registrace`, `členství`) VALUES (?, ?, ?, ?, ?, ?)'
+                        'INSERT INTO `člen` (`jméno`, `příjmení`, `email`, `heslo`, `adresa`, `datum_registrace`, `členství`) VALUES (?, ?, ?, ?, ?, ?, ?)'
                 );
-                $stmt->bind_param('ssssss', $firstName, $lastName, $email, $address, $regDate, $membership);
+                $stmt->bind_param('sssssss', $firstName, $lastName, $email, $hashedPassword, $address, $regDate, $membership);
                 $stmt->execute();
                 $stmt->close();
 
@@ -51,28 +66,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'login') {
         $loginEmail = trim($_POST['login_email'] ?? '');
-        $loginName  = trim($_POST['login_name'] ?? '');
+        $loginPassword = $_POST['login_password'] ?? '';
 
-        if ($loginEmail === '' || $loginName === '') {
-            $errorMessage = 'Please provide both your email and name to sign in.';
+        if ($loginEmail === '' || $loginPassword === '') {
+            $errorMessage = 'Please provide both your email and password to sign in.';
         } else {
-            $stmt = $conn->prepare('SELECT `ID_člen`, `jméno`, `příjmení`, `členství` FROM `člen` WHERE `email` = ? LIMIT 1');
+            $stmt = $conn->prepare('SELECT `ID_člen`, `jméno`, `příjmení`, `heslo`, `členství` FROM `člen` WHERE `email` = ? LIMIT 1');
             $stmt->bind_param('s', $loginEmail);
             $stmt->execute();
             $result = $stmt->get_result();
             $member = $result->fetch_assoc();
             $stmt->close();
 
-            if ($member && strcasecmp($member['jméno'], $loginName) === 0) {
-                $_SESSION['member_id'] = (int)$member['ID_člen'];
-                $_SESSION['member_name'] = trim($member['jméno'] . ' ' . $member['příjmení']);
-                $isAdmin = isset($member['členství']) && strcasecmp($member['členství'], 'Admin') === 0;
-                $_SESSION['is_admin'] = $isAdmin;
+            if ($member) {
+                // Check if password is set (for legacy accounts without password)
+                if (empty($member['heslo'])) {
+                    $errorMessage = 'Please contact administrator to set up your password.';
+                } elseif (password_verify($loginPassword, $member['heslo'])) {
+                    $_SESSION['member_id'] = (int)$member['ID_člen'];
+                    $_SESSION['member_name'] = trim($member['jméno'] . ' ' . $member['příjmení']);
+                    $_SESSION['last_activity'] = time();
+                    $isAdmin = isset($member['členství']) && strcasecmp($member['členství'], 'Admin') === 0;
+                    $_SESSION['is_admin'] = $isAdmin;
 
-                header('Location: ' . ($isAdmin ? 'adminMenu.php' : 'dashboard.php'));
-                exit;
+                    header('Location: ' . ($isAdmin ? 'adminMenu.php' : 'dashboard.php'));
+                    exit;
+                } else {
+                    $errorMessage = 'Invalid email or password. Please try again.';
+                }
             } else {
-                $errorMessage = 'We could not find a member with that name and email. Please try again or register.';
+                $errorMessage = 'Invalid email or password. Please try again.';
             }
         }
     }
@@ -84,6 +107,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Filmio | Sign in</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.png">
+
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
 <body class="min-h-screen bg-slate-950">
@@ -117,6 +142,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <span class="block">Email</span>
                     <input name="email" type="email" required placeholder="ava@example.com" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
                 </label>
+                <label class="space-y-2 text-sm text-slate-300 md:col-span-2">
+                    <span class="block">Password</span>
+                    <input name="password" type="password" required minlength="6" placeholder="Min. 6 characters" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
+                </label>
                 <label class="space-y-2 text-sm text-slate-300">
                     <span class="block">Membership</span>
                     <input name="membership" placeholder="Member / Host" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
@@ -136,15 +165,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <section class="w-full max-w-md space-y-9 rounded-3xl bg-white/5 p-8 ring-1 ring-white/10 backdrop-blur">
         <header class="space-y-2">
             <h2 class="text-2xl font-semibold text-white">Sign in</h2>
-            <p class="text-sm text-slate-400">Existing members can access the dashboard using their name and email.</p>
+            <p class="text-sm text-slate-400">Existing members can access the dashboard using their email and password.</p>
         </header>
         <form method="post" class="space-y-4">
-            <label for="loginName" class="text-sm text-slate-300">Name</label>
-            <input id="loginName" name="login_name" required placeholder="Ava" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
-
             <label class="text-sm text-slate-300">
                 <span class="block">Email</span>
                 <input name="login_email" type="email" required placeholder="ava@example.com" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
+            </label>
+
+            <label class="text-sm text-slate-300">
+                <span class="block">Password</span>
+                <input name="login_password" type="password" required placeholder="Your password" class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
             </label>
             <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-400 mt-4 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-200">
                 Access dashboard

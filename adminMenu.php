@@ -3,6 +3,9 @@
 session_start();
 require_once __DIR__ . '/db_connect.php';
 
+// Check session timeout
+checkSessionTimeout();
+
 if (empty($_SESSION['is_admin'])) {
     header('Location: index.php');
     exit;
@@ -14,6 +17,26 @@ if ($conn->connect_errno) {
 }
 
 $filter = isset($_GET['q']) ? trim($_GET['q']) : '';
+$editFilmId = isset($_GET['edit']) ? (int)$_GET['edit'] : 0;
+$editFilm = null;
+
+if ($editFilmId > 0) {
+    $stmt = $conn->prepare("SELECT * FROM `film` WHERE `ID_film` = ? LIMIT 1");
+    $stmt->bind_param('i', $editFilmId);
+    $stmt->execute();
+    $editFilm = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
+
+// Flash message helper
+function setFlashMessage($message, $type = 'success') {
+    $_SESSION['flash_message'] = $message;
+    $_SESSION['flash_type'] = $type;
+}
+
+$flashMessage = $_SESSION['flash_message'] ?? '';
+$flashType = $_SESSION['flash_type'] ?? 'success';
+unset($_SESSION['flash_message'], $_SESSION['flash_type']);
 
 // ---------- ZPRACOVÁNÍ POST (CREATE / DELETE) ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -38,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('sissis', $title, $year, $director, $synopsis, $length, $genre);
                 $stmt->execute();
                 $stmt->close();
+                setFlashMessage('Film "' . $title . '" was added successfully.');
             }
         }
 
@@ -48,6 +72,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('i', $filmId);
                 $stmt->execute();
                 $stmt->close();
+                setFlashMessage('Film was deleted successfully.');
+            }
+        }
+
+        if ($action === 'update') {
+            $filmId   = (int)($_POST['film_id'] ?? 0);
+            $title    = trim($_POST['title'] ?? '');
+            $director = trim($_POST['director'] ?? '');
+            $year     = (int)($_POST['year'] ?? 0);
+            $genre    = trim($_POST['genre'] ?? '');
+            $synopsis = trim($_POST['synopsis'] ?? '');
+
+            if ($filmId > 0 && $title !== '' && $director !== '' && $year > 0) {
+                $stmt = $conn->prepare("
+                    UPDATE `film`
+                    SET `název` = ?, `rok_vydání` = ?, `režisér` = ?, `popis` = ?, `žánr` = ?
+                    WHERE `ID_film` = ?
+                ");
+                $stmt->bind_param('sisssi', $title, $year, $director, $synopsis, $genre, $filmId);
+                $stmt->execute();
+                $stmt->close();
+                setFlashMessage('Film "' . $title . '" was updated successfully.');
             }
         }
     }
@@ -83,6 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $stmt->execute();
                 $stmt->close();
+                setFlashMessage('Member "' . $name . '" was added successfully.');
             }
         }
 
@@ -93,38 +140,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('i', $memberId);
                 $stmt->execute();
                 $stmt->close();
+                setFlashMessage('Member was removed successfully.');
             }
         }
+    }
+
+    // CSV EXPORT -------------------------------------------
+    if ($target === 'export') {
+        $exportType = $_POST['export_type'] ?? 'films';
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="filmio_' . $exportType . '_' . date('Y-m-d') . '.csv"');
+
+        $output = fopen('php://output', 'w');
+        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
+
+        if ($exportType === 'films') {
+            fputcsv($output, ['ID', 'Title', 'Director', 'Year', 'Genre', 'Synopsis']);
+            $result = $conn->query("SELECT `ID_film`, `název`, `režisér`, `rok_vydání`, `žánr`, `popis` FROM `film` ORDER BY `název`");
+            while ($row = $result->fetch_assoc()) {
+                fputcsv($output, [$row['ID_film'], $row['název'], $row['režisér'], $row['rok_vydání'], $row['žánr'], $row['popis']]);
+            }
+        } elseif ($exportType === 'members') {
+            fputcsv($output, ['ID', 'Name', 'Email', 'Role', 'Registered']);
+            $result = $conn->query("SELECT `ID_člen`, `jméno`, `příjmení`, `email`, `členství`, `datum_registrace` FROM `člen` ORDER BY `datum_registrace` DESC");
+            while ($row = $result->fetch_assoc()) {
+                fputcsv($output, [$row['ID_člen'], trim($row['jméno'] . ' ' . $row['příjmení']), $row['email'], $row['členství'], $row['datum_registrace']]);
+            }
+        } elseif ($exportType === 'screenings') {
+            fputcsv($output, ['ID', 'Film', 'Date', 'Time', 'Venue']);
+            $result = $conn->query("SELECT s.`ID_promítání`, f.`název`, s.`datum`, s.`čas`, s.`místo` FROM `sraz` s LEFT JOIN `film` f ON s.`ID_film` = f.`ID_film` ORDER BY s.`datum` DESC");
+            while ($row = $result->fetch_assoc()) {
+                fputcsv($output, [$row['ID_promítání'], $row['název'] ?? 'Unknown', $row['datum'], $row['čas'], $row['místo']]);
+            }
+        }
+
+        fclose($output);
+        exit;
     }
 
     // SRAZY / PROMÍTÁNÍ ------------------------------------
     if ($target === 'screenings') {
         if ($action === 'create') {
-            $filmTitle  = trim($_POST['film_title'] ?? '');
+            $filmId     = (int)($_POST['film_id'] ?? 0);
             $screenDate = $_POST['screen_date'] ?? '';
+            $screenTime = $_POST['screen_time'] ?? '19:00';
             $venue      = trim($_POST['venue'] ?? '');
-            // host / notes ignoruju – v DB pro ně nejsou sloupce
 
-            if ($filmTitle !== '' && $screenDate !== '' && $venue !== '') {
-                // najít ID_film podle názvu
-                $stmt = $conn->prepare("SELECT `ID_film` FROM `film` WHERE `název` = ? LIMIT 1");
-                $stmt->bind_param('s', $filmTitle);
+            if ($filmId > 0 && $screenDate !== '' && $venue !== '') {
+                $stmt = $conn->prepare("
+                    INSERT INTO `sraz` (`datum`, `čas`, `místo`, `ID_film`)
+                    VALUES (?, ?, ?, ?)
+                ");
+                $stmt->bind_param('sssi', $screenDate, $screenTime, $venue, $filmId);
                 $stmt->execute();
-                $stmt->bind_result($filmId);
-                $stmt->fetch();
                 $stmt->close();
-
-                if (!empty($filmId)) {
-                    $time = '00:00:00'; // nemáš time input, tak default
-
-                    $stmt = $conn->prepare("
-                        INSERT INTO `sraz` (`datum`, `čas`, `místo`, `ID_film`)
-                        VALUES (?, ?, ?, ?)
-                    ");
-                    $stmt->bind_param('sssi', $screenDate, $time, $venue, $filmId);
-                    $stmt->execute();
-                    $stmt->close();
-                }
+                setFlashMessage('Screening was scheduled successfully.');
             }
         }
 
@@ -135,6 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('i', $screeningId);
                 $stmt->execute();
                 $stmt->close();
+                setFlashMessage('Screening was deleted successfully.');
             }
         }
     }
@@ -190,6 +262,7 @@ $stmt->close();
           content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>Filmio | Admin</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.png">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
 
@@ -214,12 +287,18 @@ $stmt->close();
         </nav>
     </header>
 
+    <?php if ($flashMessage): ?>
+        <div class="rounded-xl border <?= $flashType === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-red-500/30 bg-red-500/10 text-red-100' ?> px-4 py-3 text-sm ring-1 <?= $flashType === 'success' ? 'ring-emerald-500/20' : 'ring-red-500/20' ?>">
+            <?= htmlspecialchars($flashMessage) ?>
+        </div>
+    <?php endif; ?>
+
     <div class="grid gap-6 md:grid-cols-3" id="films">
-        <form method="post" class="col-span-2 space-y-4 rounded-2xl bg-white/5 p-6 ring-1 ring-white/10 backdrop-blur">
+        <form method="post" class="col-span-2 space-y-4 rounded-2xl bg-white/5 p-6 ring-1 ring-white/10 backdrop-blur <?= $editFilm ? 'ring-2 ring-indigo-500/50' : '' ?>">
             <div class="flex items-start justify-between gap-4">
                 <div>
-                    <h2 class="text-xl font-semibold text-white">Add a film</h2>
-                    <p class="text-sm text-slate-400">Create a new screening entry by filling in the details below.</p>
+                    <h2 class="text-xl font-semibold text-white"><?= $editFilm ? 'Edit film' : 'Add a film' ?></h2>
+                    <p class="text-sm text-slate-400"><?= $editFilm ? 'Update the film details below.' : 'Create a new screening entry by filling in the details below.' ?></p>
                 </div>
                 <span class="rounded-lg bg-white/10 px-3 py-1 text-xs text-slate-200 ring-1 ring-white/15">
                     <?= $filmCount ?> <?= $filmCount === 1 ? 'film' : 'films' ?>
@@ -228,34 +307,42 @@ $stmt->close();
             <div class="grid gap-4 md:grid-cols-2">
                 <label class="space-y-2 text-sm text-slate-300">
                     <span class="block">Title</span>
-                    <input name="title" required placeholder="The Grand Budapest Hotel"
+                    <input name="title" required placeholder="The Grand Budapest Hotel" value="<?= htmlspecialchars($editFilm['název'] ?? '') ?>"
                            class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
                 </label>
                 <label class="space-y-2 text-sm text-slate-300">
                     <span class="block">Director</span>
-                    <input name="director" required placeholder="Wes Anderson"
+                    <input name="director" required placeholder="Wes Anderson" value="<?= htmlspecialchars($editFilm['režisér'] ?? '') ?>"
                            class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
                 </label>
                 <label class="space-y-2 text-sm text-slate-300">
                     <span class="block">Year</span>
-                    <input name="year" type="number" min="1888" max="2100" required placeholder="2014"
+                    <input name="year" type="number" min="1888" max="2100" required placeholder="2014" value="<?= $editFilm ? (int)$editFilm['rok_vydání'] : '' ?>"
                            class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
                 </label>
                 <label class="space-y-2 text-sm text-slate-300">
                     <span class="block">Genre</span>
-                    <input name="genre" required placeholder="Comedy / Drama"
+                    <input name="genre" required placeholder="Comedy / Drama" value="<?= htmlspecialchars($editFilm['žánr'] ?? '') ?>"
                            class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none" />
                 </label>
                 <label class="space-y-2 text-sm text-slate-300 md:col-span-2">
                     <span class="block">Synopsis</span>
-                    <textarea name="synopsis" rows="3" required placeholder="A concierge and his lobby boy get tangled in a caper across a pastel Europe." class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none"></textarea>
+                    <textarea name="synopsis" rows="3" required placeholder="A concierge and his lobby boy get tangled in a caper across a pastel Europe." class="w-full rounded-xl bg-slate-900/60 px-4 py-3 text-white ring-1 ring-inset ring-white/10 focus:ring-emerald-400 outline-none"><?= htmlspecialchars($editFilm['popis'] ?? '') ?></textarea>
                 </label>
             </div>
-            <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300">
-                <span>Save entry</span>
-            </button>
+            <div class="flex items-center gap-3">
+                <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl <?= $editFilm ? 'bg-indigo-500 hover:bg-indigo-400' : 'bg-emerald-500 hover:bg-emerald-400' ?> px-5 py-3 text-sm font-semibold text-slate-950 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300">
+                    <span><?= $editFilm ? 'Update film' : 'Save entry' ?></span>
+                </button>
+                <?php if ($editFilm): ?>
+                    <a href="adminMenu.php#films" class="rounded-xl px-5 py-3 text-sm font-semibold text-slate-300 hover:text-white">Cancel</a>
+                <?php endif; ?>
+            </div>
             <input type="hidden" name="target" value="films">
-            <input type="hidden" name="action" value="create">
+            <input type="hidden" name="action" value="<?= $editFilm ? 'update' : 'create' ?>">
+            <?php if ($editFilm): ?>
+                <input type="hidden" name="film_id" value="<?= (int)$editFilm['ID_film'] ?>">
+            <?php endif; ?>
         </form>
 
         <aside class="space-y-3 rounded-2xl bg-white/5 p-6 ring-1 ring-white/10 backdrop-blur">
@@ -275,7 +362,23 @@ $stmt->close();
                 </li>
                 <li class="flex items-center justify-between py-3">
                     <span>Export</span>
-                    <button class="rounded-lg bg-slate-900/60 px-3 py-1 text-white ring-1 ring-white/10">CSV</button>
+                    <div class="flex gap-1">
+                        <form method="post" class="inline">
+                            <input type="hidden" name="target" value="export">
+                            <input type="hidden" name="export_type" value="films">
+                            <button type="submit" class="rounded-lg bg-slate-900/60 px-2 py-1 text-xs text-white ring-1 ring-white/10 hover:bg-slate-800/60">Films</button>
+                        </form>
+                        <form method="post" class="inline">
+                            <input type="hidden" name="target" value="export">
+                            <input type="hidden" name="export_type" value="members">
+                            <button type="submit" class="rounded-lg bg-slate-900/60 px-2 py-1 text-xs text-white ring-1 ring-white/10 hover:bg-slate-800/60">Members</button>
+                        </form>
+                        <form method="post" class="inline">
+                            <input type="hidden" name="target" value="export">
+                            <input type="hidden" name="export_type" value="screenings">
+                            <button type="submit" class="rounded-lg bg-slate-900/60 px-2 py-1 text-xs text-white ring-1 ring-white/10 hover:bg-slate-800/60">Screenings</button>
+                        </form>
+                    </div>
                 </li>
             </ul>
         </aside>
@@ -316,12 +419,15 @@ $stmt->close();
                             <td class="px-4 py-3"><?= htmlspecialchars($film['žánr']) ?></td>
                             <td class="px-4 py-3 text-slate-300"><?= htmlspecialchars($film['popis']) ?></td>
                             <td class="px-4 py-3">
-                                <form method="post" class="inline">
-                                    <input type="hidden" name="film_id" value="<?= (int)$film['ID_film'] ?>">
-                                    <input type="hidden" name="target" value="films">
-                                    <input type="hidden" name="action" value="delete">
-                                    <button class="rounded-lg bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 ring-1 ring-red-500/40 hover:bg-red-500/30" onclick="return confirm('Delete this film?')">Delete</button>
-                                </form>
+                                <div class="flex items-center gap-2">
+                                    <a href="?edit=<?= (int)$film['ID_film'] ?>#films" class="rounded-lg bg-indigo-500/20 px-3 py-2 text-xs font-semibold text-indigo-200 ring-1 ring-indigo-500/40 hover:bg-indigo-500/30">Edit</a>
+                                    <form method="post" class="inline">
+                                        <input type="hidden" name="film_id" value="<?= (int)$film['ID_film'] ?>">
+                                        <input type="hidden" name="target" value="films">
+                                        <input type="hidden" name="action" value="delete">
+                                        <button class="rounded-lg bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-200 ring-1 ring-red-500/40 hover:bg-red-500/30" onclick="return confirm('Delete this film?')">Delete</button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -414,25 +520,26 @@ $stmt->close();
             </div>
             <form method="post" class="space-y-4">
                 <div class="grid gap-3 md:grid-cols-2">
-                    <label class="space-y-2 text-sm text-slate-300">
-                        <span class="block">Film title</span>
-                        <input name="film_title" required placeholder="Portrait of a Lady on Fire" class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none" />
-                    </label>
-                    <label class="space-y-2 text-sm text-slate-300">
-                        <span class="block">Host</span>
-                        <input name="host" required placeholder="Marisol" class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none" />
+                    <label class="space-y-2 text-sm text-slate-300 md:col-span-2">
+                        <span class="block">Film</span>
+                        <select name="film_id" required class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none">
+                            <option value="" disabled selected>Select a film from catalog</option>
+                            <?php foreach ($filmRows as $film): ?>
+                                <option value="<?= (int)$film['ID_film'] ?>"><?= htmlspecialchars($film['název']) ?> (<?= (int)$film['rok_vydání'] ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
                     </label>
                     <label class="space-y-2 text-sm text-slate-300">
                         <span class="block">Date</span>
                         <input name="screen_date" type="date" required class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none" />
                     </label>
                     <label class="space-y-2 text-sm text-slate-300">
-                        <span class="block">Venue</span>
-                        <input name="venue" required placeholder="Main Hall" class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none" />
+                        <span class="block">Time</span>
+                        <input name="screen_time" type="time" required value="19:00" class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none" />
                     </label>
                     <label class="space-y-2 text-sm text-slate-300 md:col-span-2">
-                        <span class="block">Notes</span>
-                        <textarea name="notes" rows="3" required placeholder="Snacks at 7pm, film at 7:30." class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none"></textarea>
+                        <span class="block">Venue</span>
+                        <input name="venue" required placeholder="Main Hall" class="w-full rounded-xl bg-slate-900/60 px-3 py-2 text-white ring-1 ring-white/10 focus:ring-emerald-400 outline-none" />
                     </label>
                 </div>
                 <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-200">Save screening</button>
